@@ -7,13 +7,15 @@
     <style>
         body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f4f4f9; }
         #chat-box { background: white; border-radius: 10px; padding: 15px; height: 400px; overflow-y: scroll; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 10px; }
-        .message { margin: 10px 0; padding: 10px; border-radius: 8px; }
+        .message { margin: 10px 0; padding: 10px; border-radius: 8px; word-wrap: break-word; }
         .user { background: #007bff; color: white; text-align: right; }
         .bot { background: #e9ecef; color: black; text-align: left; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         #input-area { display: flex; gap: 10px; }
         input, button { padding: 10px; border-radius: 5px; border: 1px solid #ccc; }
         #user-input { flex: 1; }
         button { background: #28a745; color: white; border: none; cursor: pointer; }
+        button:disabled { background: #6c757d; cursor: not-allowed; }
         #api-key-area { margin-bottom: 20px; padding: 10px; background: #fff3cd; border-radius: 5px; font-size: 12px; }
     </style>
 </head>
@@ -21,9 +23,8 @@
 
     <h2>🤖 Mon Assistant IA (Groq)</h2>
     
-    <!-- Zone pour mettre la clé API en sécurité -->
     <div id="api-key-area">
-        <label>🔑 Ta clé API Groq (ne la partage pas) :</label><br>
+        <label>🔑 Ta clé API Groq :</label><br>
         <input type="password" id="api-key" placeholder="Colle ta clé gsk_... ici" style="width: 100%; margin-top: 5px;">
     </div>
 
@@ -33,35 +34,38 @@
 
     <div id="input-area">
         <input type="text" id="user-input" placeholder="Écris ton message...">
-        <button onclick="sendMessage()">Envoyer</button>
+        <button onclick="sendMessage()" id="send-btn">Envoyer</button>
     </div>
 
     <script>
-        let messages = [{ role: "system", content: "Tu es un assistant IA très utile et sympathique." }];
+        let messages = [{ role: "system", content: "Tu es un assistant IA utile et sympathique." }];
 
         async function sendMessage() {
             const inputField = document.getElementById("user-input");
-            const apiKey = document.getElementById("api-key").value;
+            const apiKey = document.getElementById("api-key").value.trim();
             const chatBox = document.getElementById("chat-box");
+            const sendBtn = document.getElementById("send-btn");
             const userText = inputField.value.trim();
 
             if (!userText) return;
-            if (!apiKey) { alert("⚠️ N'oublie pas de mettre ta clé API Groq en haut !"); return; }
+            if (!apiKey) { 
+                addMessage("❌ Erreur : Mets ta clé API Groq en haut d'abord !", "error");
+                return; 
+            }
 
-            // Afficher le message de l'utilisateur
-            chatBox.innerHTML += `<div class="message user">${userText}</div>`;
+            // Afficher le message utilisateur
+            addMessage(userText, "user");
             inputField.value = "";
-            chatBox.scrollTop = chatBox.scrollHeight;
+            sendBtn.disabled = true;
 
-            // Ajouter à l'historique
-            messages.push({ role: "user", content: userText });
-
-            // Afficher "En train d'écrire..."
-            const loadingId = "loading-" + Date.now();
-            chatBox.innerHTML += `<div class="message bot" id="${loadingId}">⏳ Réflexion...</div>`;
+            // Afficher "en train d'écrire"
+            const loadingDiv = addMessage("⏳ Réflexion...", "bot");
 
             try {
-                // Appel à l'API de Groq
+                // Ajouter le message à l'historique
+                messages.push({ role: "user", content: userText });
+
+                // Appel API Groq
                 const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                     method: "POST",
                     headers: {
@@ -70,24 +74,55 @@
                     },
                     body: JSON.stringify({
                         model: "llama-3.3-70b-versatile",
-                        messages: messages
+                        messages: messages,
+                        temperature: 0.7,
+                        max_tokens: 1000
                     })
                 });
 
-                const data = await response.json();
-                const botReply = data.choices[0].message.content;
+                // Vérifier si la réponse est OK
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || `Erreur HTTP ${response.status}`);
+                }
 
-                // Mettre à jour l'affichage
-                document.getElementById(loadingId).innerText = botReply;
+                const data = await response.json();
+                
+                // Vérifier que la réponse contient des choix
+                if (!data.choices || data.choices.length === 0) {
+                    throw new Error("Réponse vide de l'API");
+                }
+
+                const botReply = data.choices[0].message.content;
+                
+                // Mettre à jour le message de chargement
+                loadingDiv.textContent = botReply;
+                loadingDiv.className = "message bot";
+                
+                // Ajouter à l'historique
                 messages.push({ role: "assistant", content: botReply });
 
             } catch (error) {
-                document.getElementById(loadingId).innerText = "❌ Erreur : " + error.message;
+                loadingDiv.textContent = "❌ Erreur : " + error.message;
+                loadingDiv.className = "message error";
+                console.error("Erreur complète:", error);
             }
+
+            sendBtn.disabled = false;
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        // Permettre d'envoyer avec la touche Entrée
+        function addMessage(text, type) {
+            const chatBox = document.getElementById("chat-box");
+            const div = document.createElement("div");
+            div.className = `message ${type}`;
+            div.textContent = text;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+            return div;
+        }
+
+        // Envoyer avec Entrée
         document.getElementById("user-input").addEventListener("keypress", function(event) {
             if (event.key === "Enter") sendMessage();
         });
